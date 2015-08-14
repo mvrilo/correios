@@ -66,11 +66,11 @@ func (r *result) getLastStatus() string {
 func main() {
 	correios := &cobra.Command{
 		Use:  "correios",
-		Long: "Simple command line tool to track your orders from for Correios",
+		Long: "Simple command line tool to track your orders from Correios",
 	}
 	checker := &cobra.Command{
 		Use:   "check [code]",
-		Short: "Check the status of the code",
+		Short: "Check the status of an order",
 		Run: func(cmd *cobra.Command, args []string) {
 			if len(args) == 0 {
 				println(cmd.UsageString())
