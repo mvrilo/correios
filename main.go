@@ -1,68 +1,83 @@
 package main
 
 import (
-	"bytes"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 
 	"github.com/PuerkitoBio/goquery"
-	"github.com/kr/pretty"
+	"github.com/spf13/cobra"
 )
 
 const URL = "http://www2.correios.com.br/sistemas/rastreamento/resultado.cfm"
 
-var storage = os.Getenv("HOME") + "/.correios"
-
-func get(code string) *goquery.Selection {
-	res, err := http.PostForm(URL, url.Values{
-		"P_LINGUA": []string{"001"},
-		"P_TIPO":   []string{"001"},
-		"objetos":  []string{code},
-	})
-	checkErr(err)
-	defer res.Body.Close()
-
-	doc, err := goquery.NewDocumentFromResponse(res)
-	checkErr(err)
-
-	return doc.Find(".ctrlcontent").First()
+type result struct {
+	selection  *goquery.Selection
+	lastStatus string
+	code       string
 }
 
-func checkErr(err error) {
-	if err != nil {
+func getResult(code string) *result {
+	r := new(result)
+	r.code = code
+	if err := r.get(); err != nil {
 		log.Println(err)
 		os.Exit(1)
 	}
+	r.getLastStatus()
+	return r
 }
 
-func getCodes() *bytes.Buffer {
-	var f *os.File
-	var err error
-	if _, err = os.Stat(storage); os.IsNotExist(err) {
-		f, err = os.Create(storage)
-		checkErr(err)
+func (r *result) get() error {
+	body := strings.NewReader(url.Values{"objetos": {r.code}}.Encode())
+	req, err := http.NewRequest("POST", URL, body)
+	if err != nil {
+		return err
 	}
 
-	if f == nil {
-		f, err = os.Open(storage)
-		checkErr(err)
+	req.Header.Add("Referer", "http://www.correios.com.br/para-voce")
+	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+
+	res, err := new(http.Client).Do(req)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+	doc, err := goquery.NewDocumentFromResponse(res)
+	if err != nil {
+		return err
 	}
 
-	var data []byte
-	data, err = ioutil.ReadAll(f)
-	checkErr(err)
-
-	return bytes.NewBuffer(data)
+	r.selection = doc.Find(".ctrlcontent")
+	return nil
 }
 
-func check(code string) {
-	if code == "" {
-	}
+func (r *result) getLastStatus() string {
+	highlight := r.selection.Find(".highlightSRO")
+	title := highlight.Find("strong").Text()
+	h, _ := highlight.Html()
+	info := strings.Split(h, "\n")[3]
+	r.lastStatus = title + " - " + strings.Split(info, "<br/>")[2]
+	return r.lastStatus
 }
 
 func main() {
-	pretty.Println(get("RR017527799VN"))
+	flags := &cobra.Command{Use: "correios"}
+	checker := &cobra.Command{
+		Use:   "check [code]",
+		Short: "Check the status of the code",
+		Run: func(cmd *cobra.Command, args []string) {
+			if len(args) == 0 {
+				println(cmd.UsageString())
+				return
+			}
+			res := getResult(strings.Join(args, ";"))
+			println(res.getLastStatus())
+		},
+	}
+
+	flags.AddCommand(checker)
+	flags.Execute()
 }
