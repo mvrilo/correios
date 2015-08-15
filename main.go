@@ -1,40 +1,43 @@
 package main
 
 import (
-	"log"
+	"fmt"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/spf13/cobra"
 )
 
-const URL = "http://www2.correios.com.br/sistemas/rastreamento/resultado.cfm"
+const (
+	multiURL    = "http://www2.correios.com.br/sistemas/rastreamento/multResultado.cfm"
+	detailedURL = "http://www2.correios.com.br/sistemas/rastreamento/resultado.cfm"
+)
 
 type result struct {
-	selection  *goquery.Selection
-	lastStatus string
-	code       string
+	codes  string
+	orders []order
 }
 
-func getResult(code string) *result {
+type order struct {
+	id     string
+	status string
+	date   string
+}
+
+func fetchOrders(codes string) *result {
 	r := new(result)
-	r.code = code
-	if err := r.get(); err != nil {
-		log.Println(err)
-		os.Exit(1)
-	}
-	r.getLastStatus()
+	r.codes = codes
+	r.orders = r.getOrders()
 	return r
 }
 
-func (r *result) get() error {
-	body := strings.NewReader(url.Values{"objetos": {r.code}}.Encode())
-	req, err := http.NewRequest("POST", URL, body)
+func (r *result) get(u string) (*goquery.Selection, error) {
+	body := strings.NewReader(url.Values{"objetos": {r.codes}}.Encode())
+	req, err := http.NewRequest("POST", u, body)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	req.Header.Add("Referer", "http://www.correios.com.br/para-voce")
@@ -42,25 +45,45 @@ func (r *result) get() error {
 
 	res, err := new(http.Client).Do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer res.Body.Close()
 	doc, err := goquery.NewDocumentFromResponse(res)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	r.selection = doc.Find(".ctrlcontent")
-	return nil
+	return doc.Find(".ctrlcontent").First(), nil
 }
 
-func (r *result) getLastStatus() string {
-	highlight := r.selection.Find(".highlightSRO")
-	title := highlight.Find("strong").Text()
-	h, _ := highlight.Html()
-	info := strings.Split(h, "\n")[3]
-	r.lastStatus = title + " - " + strings.Split(info, "<br/>")[2]
-	return r.lastStatus
+func (r *result) getOrders() (o []order) {
+	content, err := r.get(multiURL)
+	if err != nil {
+		panic(err)
+	}
+
+	content.Find("tbody tr").Each(func(i int, tr *goquery.Selection) {
+		td := tr.Find("td")
+		o = append(o, order{
+			id:     td.Eq(0).Text(),
+			status: td.Eq(1).Text(),
+			date:   td.Eq(2).Text(),
+		})
+	})
+	return
+}
+
+func (r *result) String() (ret string) {
+	if len(r.orders) == 0 {
+		return "No orders found"
+	}
+	for i, o := range r.orders {
+		if i > 0 {
+			ret += "\n"
+		}
+		ret += fmt.Sprintf("[%s] %s - %s", o.id, o.status, o.date)
+	}
+	return
 }
 
 func main() {
@@ -69,15 +92,15 @@ func main() {
 		Long: "Simple command line tool to track your orders from Correios",
 	}
 	checker := &cobra.Command{
-		Use:   "check [code]",
-		Short: "Check the status of an order",
+		Use:   "check [codes]",
+		Short: "Check the status of one or more orders",
 		Run: func(cmd *cobra.Command, args []string) {
 			if len(args) == 0 {
-				println(cmd.UsageString())
+				fmt.Println(cmd.Usage())
 				return
 			}
-			res := getResult(strings.Join(args, ";"))
-			println(res.getLastStatus())
+			res := fetchOrders(strings.Join(args, ";"))
+			fmt.Println(res)
 		},
 	}
 
