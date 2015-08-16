@@ -18,7 +18,8 @@ const (
 )
 
 var db = &database{
-	dir: os.Getenv("HOME") + "/.correios",
+	dir:   os.Getenv("HOME") + "/.correios",
+	flags: os.O_CREATE | os.O_RDWR,
 }
 
 type result struct {
@@ -34,25 +35,22 @@ type order struct {
 
 type database struct {
 	*os.File
-	dir string
+	flags int
+	dir   string
 }
 
 func (d *database) open() (f *os.File, err error) {
-	if d.File != nil {
-		return d.File, nil
-	}
-	if f, err = os.OpenFile(d.dir, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0644); err != nil {
+	if f, err = os.OpenFile(d.dir, d.flags, 0644); err != nil {
 		return
 	}
-	d.File = f
 	return
 }
 
-func (d *database) scan(fn func(*bufio.Scanner)) {
+func (d *database) scan(fn func(*bufio.Scanner)) *os.File {
 	f, err := d.open()
 	if err != nil {
 		fmt.Println(err)
-		return
+		return nil
 	}
 
 	s := bufio.NewScanner(f)
@@ -63,34 +61,62 @@ func (d *database) scan(fn func(*bufio.Scanner)) {
 	if err = s.Err(); err != nil {
 		fmt.Println(err)
 	}
+
+	return f
 }
 
-func (d *database) codeExists(code string) (b bool) {
-	d.scan(func(s *bufio.Scanner) {
+func (d *database) codeExists(code string) (b bool, f *os.File) {
+	f = d.scan(func(s *bufio.Scanner) {
 		b = strings.Contains(s.Text(), code)
 	})
-	return b
+	return b, f
 }
 
 func (d *database) read() (data []string) {
 	d.scan(func(s *bufio.Scanner) {
-		a := s.Text()
-		data = append(data, a)
+		data = append(data, s.Text())
 	})
 	return data
 }
 
 func (d *database) write(code string) (bool, error) {
-	if d.codeExists(code) {
+	d.flags = d.flags | os.O_APPEND
+	ok, f := d.codeExists(code)
+	if f != nil {
+		defer f.Close()
+	}
+	if ok {
 		return true, nil
 	}
 
+	if _, err := f.WriteString(fmt.Sprintf("%s\n", code)); err != nil {
+		return false, err
+	}
+	return false, nil
+}
+
+func (d *database) remove(code string) (bool, error) {
+	d.flags = d.flags | os.O_APPEND
 	f, err := d.open()
+	if f != nil {
+		defer f.Close()
+	}
 	if err != nil {
 		return false, err
 	}
 
-	if _, err = f.WriteString(fmt.Sprintf("%s\n", code)); err != nil {
+	var newData []string
+	for _, line := range d.read() {
+		if code != line {
+			newData = append(newData, line)
+		}
+	}
+
+	if err = f.Truncate(0); err != nil {
+		return false, err
+	}
+
+	if _, err = f.WriteString(strings.Join(newData, "\n") + "\n"); err != nil {
 		return false, err
 	}
 	return false, nil
@@ -172,8 +198,12 @@ func check(cmd *cobra.Command, args []string) {
 	fmt.Println(res)
 }
 
+func list(cmd *cobra.Command, args []string) {
+	fmt.Println(strings.Join(db.read(), "\n"))
+}
+
 func add(cmd *cobra.Command, args []string) {
-	if len(args) == 0 {
+	if len(args) != 1 {
 		cmd.Usage()
 		return
 	}
@@ -181,11 +211,28 @@ func add(cmd *cobra.Command, args []string) {
 	exists, err := db.write(args[0])
 	if exists {
 		fmt.Println("code already added")
-		return
+		os.Exit(1)
 	}
 	if err != nil {
 		fmt.Println(err)
+		os.Exit(1)
+	}
+}
+
+func rm(cmd *cobra.Command, args []string) {
+	if len(args) != 1 {
+		cmd.Usage()
 		return
+	}
+
+	noExists, err := db.remove(args[0])
+	if noExists {
+		fmt.Println("code not found")
+		os.Exit(1)
+	}
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
 	}
 }
 
@@ -199,16 +246,29 @@ func main() {
 		Short: "Check the status of one or more orders or the ones that you previously added",
 		Run:   check,
 	}
+	listCmd := &cobra.Command{
+		Use:   "list",
+		Short: "List codes",
+		Run:   list,
+	}
 	addCmd := &cobra.Command{
-		Use:   "add <code> [name]",
+		Use:   "add <code>",
 		Short: "Store a order code to check later without specifying it",
-		Long: ` After adding a order, simply just check the orders without passing the code to check command
+		Long: `After adding a order, simply just check the orders without passing the code to check command
 e.g.
 $ correios check`,
 		Run: add,
 	}
+	rmCmd := &cobra.Command{
+		Use:   "rm <code>",
+		Short: "Remove an order code from the storage file",
+		Run:   rm,
+	}
 
 	correios.AddCommand(checkCmd)
+	correios.AddCommand(listCmd)
 	correios.AddCommand(addCmd)
+	correios.AddCommand(rmCmd)
 	correios.Execute()
+	db.Close()
 }
