@@ -4,11 +4,14 @@ Track your shit from [correios](http://www.correios.com.br/) via command line.
 
 # Usage
 
-Track one or more orders:
-
 ```
 correios check [code1] [code2]
+correios list
+correios add <code>
+correios rm <code>
 ```
+
+`add` stores the orders in `$HOME/.correios`.
 
 # Author
 
