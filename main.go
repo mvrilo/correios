@@ -89,6 +89,7 @@ func (d *database) write(code string) (bool, error) {
 		return true, nil
 	}
 
+	code = strings.Trim(code, "\n")
 	if _, err := f.WriteString(fmt.Sprintf("%s\n", code)); err != nil {
 		return false, err
 	}
