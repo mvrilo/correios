@@ -11,7 +11,7 @@ correios add <code>
 correios rm <code>
 ```
 
-`add` stores the orders in `$HOME/.correios`.
+`add` stores the tracking codes in `$HOME/.correios`.
 
 # Author
 
