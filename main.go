@@ -12,10 +12,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const (
-	multiURL    = "http://www2.correios.com.br/sistemas/rastreamento/multResultado.cfm"
-	detailedURL = "http://www2.correios.com.br/sistemas/rastreamento/resultado.cfm"
-)
+const multiURL = "http://www2.correios.com.br/sistemas/rastreamento/multResultado.cfm"
 
 var db = &database{
 	dir:   os.Getenv("HOME") + "/.correios",
