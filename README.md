@@ -1,6 +1,6 @@
 # correios
 
-Track your shit from [correios](http://www.correios.com.br/) via command line.
+Track your orders from [correios](http://www.correios.com.br/) via command line.
 
 # Usage
 
@@ -11,7 +11,7 @@ correios add <code>
 correios rm <code>
 ```
 
-Tracking codes are stored in `$HOME/.correios`.
+The codes are stored in `$HOME/.correios`.
 
 # Author
 
