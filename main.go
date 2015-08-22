@@ -12,6 +12,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
+func fatal(err error) {
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+}
+
 const multiURL = "http://www2.correios.com.br/sistemas/rastreamento/multResultado.cfm"
 
 var db = &database{
@@ -185,15 +192,20 @@ func check(cmd *cobra.Command, args []string) {
 	if len(args) > 0 {
 		codes = strings.Join(args, ";")
 	} else {
-		for i, line := range db.read() {
+		var i int
+		for _, line := range db.read() {
+			if len(line) != 13 {
+				continue
+			}
+
 			if i > 0 {
 				codes += ";"
 			}
 			codes += strings.Split(line, " ")[0]
+			i += 1
 		}
 	}
-	res := fetchOrders(codes)
-	fmt.Println(res)
+	fmt.Println(fetchOrders(codes))
 }
 
 func list(cmd *cobra.Command, args []string) {
@@ -206,15 +218,17 @@ func add(cmd *cobra.Command, args []string) {
 		return
 	}
 
+	if len(args[0]) != 13 {
+		fmt.Println("code must have 13 characters")
+		os.Exit(1)
+	}
+
 	exists, err := db.write(args[0])
 	if exists {
 		fmt.Println("code already added")
 		os.Exit(1)
 	}
-	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	}
+	fatal(err)
 }
 
 func rm(cmd *cobra.Command, args []string) {
@@ -228,10 +242,7 @@ func rm(cmd *cobra.Command, args []string) {
 		fmt.Println("code not found")
 		os.Exit(1)
 	}
-	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	}
+	fatal(err)
 }
 
 func main() {
