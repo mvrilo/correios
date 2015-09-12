@@ -20,6 +20,13 @@ func fatal(err error) {
 	}
 }
 
+func almostFatal(s string) {
+	if s != "" {
+		fmt.Println(s)
+		os.Exit(1)
+	}
+}
+
 const multiURL = "http://www2.correios.com.br/sistemas/rastreamento/multResultado.cfm"
 
 var db = &database{
@@ -209,20 +216,16 @@ func list(c *cli.Context) {
 func add(c *cli.Context) {
 	args := c.Args()
 	if len(args) != 1 {
-		fmt.Println(c.App.Usage)
-		os.Exit(1)
+		almostFatal(c.App.Usage)
 	}
 
-	println(args[0], len(args[0]))
 	if len(args[0]) != 13 {
-		fmt.Println("Tracking code must have 13 characters")
-		os.Exit(1)
+		almostFatal("Tracking code must have 13 characters")
 	}
 
 	exists, err := db.write(args[0])
 	if exists {
-		fmt.Println("Tracking code already added")
-		os.Exit(1)
+		almostFatal("Tracking code already added")
 	}
 	fatal(err)
 }
@@ -230,14 +233,12 @@ func add(c *cli.Context) {
 func rm(c *cli.Context) {
 	args := c.Args()
 	if len(args) != 1 {
-		fmt.Println(c.App.Usage)
-		os.Exit(1)
+		almostFatal(c.App.Usage)
 	}
 
 	noExists, err := db.remove(args[0])
 	if noExists {
-		fmt.Println("Tracking code not found")
-		os.Exit(1)
+		almostFatal("Tracking code not found")
 	}
 	fatal(err)
 }
@@ -283,8 +284,8 @@ func main() {
 			Usage:   "Store an order code to check later without specifying it",
 			Action:  add,
 		}, {
-			Name:    "rm",
-			Aliases: []string{"rm"},
+			Name:    "remove",
+			Aliases: []string{"rm", "r"},
 			Usage:   "Remove an order code from the storage file",
 			Action:  rm,
 		},
