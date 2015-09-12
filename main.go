@@ -9,7 +9,8 @@ import (
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
-	"github.com/spf13/cobra"
+	"github.com/codegangsta/cli"
+	"github.com/mitchellh/go-homedir"
 )
 
 func fatal(err error) {
@@ -22,7 +23,6 @@ func fatal(err error) {
 const multiURL = "http://www2.correios.com.br/sistemas/rastreamento/multResultado.cfm"
 
 var db = &database{
-	dir:   os.Getenv("HOME") + "/.correios",
 	flags: os.O_CREATE | os.O_RDWR,
 }
 
@@ -39,19 +39,12 @@ type order struct {
 
 type database struct {
 	*os.File
-	flags int
-	dir   string
-}
-
-func (d *database) open() (f *os.File, err error) {
-	if f, err = os.OpenFile(d.dir, d.flags, 0644); err != nil {
-		return
-	}
-	return
+	flags   int
+	storage string
 }
 
 func (d *database) scan(fn func(*bufio.Scanner)) *os.File {
-	f, err := d.open()
+	f, err := os.OpenFile(d.storage, d.flags, 0644)
 	if err != nil {
 		fmt.Println(err)
 		return nil
@@ -102,7 +95,7 @@ func (d *database) write(code string) (bool, error) {
 
 func (d *database) remove(code string) (bool, error) {
 	d.flags = d.flags | os.O_APPEND
-	f, err := d.open()
+	f, err := os.OpenFile(d.storage, d.flags, 0644)
 	if f != nil {
 		defer f.Close()
 	}
@@ -187,7 +180,8 @@ func (r *result) String() (ret string) {
 	return
 }
 
-func check(cmd *cobra.Command, args []string) {
+func check(c *cli.Context) {
+	args := c.Args()
 	var codes string
 	if len(args) > 0 {
 		codes = strings.Join(args, ";")
@@ -202,82 +196,99 @@ func check(cmd *cobra.Command, args []string) {
 				codes += ";"
 			}
 			codes += strings.Split(line, " ")[0]
-			i += 1
+			i++
 		}
 	}
 	fmt.Println(fetchOrders(codes))
 }
 
-func list(cmd *cobra.Command, args []string) {
+func list(c *cli.Context) {
 	fmt.Println(strings.Join(db.read(), "\n"))
 }
 
-func add(cmd *cobra.Command, args []string) {
+func add(c *cli.Context) {
+	args := c.Args()
 	if len(args) != 1 {
-		cmd.Usage()
-		return
+		fmt.Println(c.App.Usage)
+		os.Exit(1)
 	}
 
+	println(args[0], len(args[0]))
 	if len(args[0]) != 13 {
-		fmt.Println("code must have 13 characters")
+		fmt.Println("Tracking code must have 13 characters")
 		os.Exit(1)
 	}
 
 	exists, err := db.write(args[0])
 	if exists {
-		fmt.Println("code already added")
+		fmt.Println("Tracking code already added")
 		os.Exit(1)
 	}
 	fatal(err)
 }
 
-func rm(cmd *cobra.Command, args []string) {
+func rm(c *cli.Context) {
+	args := c.Args()
 	if len(args) != 1 {
-		cmd.Usage()
-		return
+		fmt.Println(c.App.Usage)
+		os.Exit(1)
 	}
 
 	noExists, err := db.remove(args[0])
 	if noExists {
-		fmt.Println("code not found")
+		fmt.Println("Tracking code not found")
 		os.Exit(1)
 	}
 	fatal(err)
 }
 
 func main() {
-	correios := &cobra.Command{
-		Use:  "correios",
-		Long: "Simple command line tool to track your orders from Correios",
+	home, err := homedir.Dir()
+	if err != nil {
+		fatal(err)
 	}
-	checkCmd := &cobra.Command{
-		Use:   "check [code] [code]",
-		Short: "Check the status of one or more orders or the ones that you previously added",
-		Run:   check,
+	correios := cli.NewApp()
+	correios.Name = "correios"
+	correios.Author = "Murilo Santana"
+	correios.Email = "mvrilo@gmail.com"
+	correios.Usage = "Simple command line tool to track your orders from Correios"
+	correios.Version = "0.1.0"
+	correios.EnableBashCompletion = true
+	correios.Before = func(c *cli.Context) error {
+		db.storage = c.String("f")
+		return nil
 	}
-	listCmd := &cobra.Command{
-		Use:   "list",
-		Short: "List codes",
-		Run:   list,
+	correios.Flags = []cli.Flag{
+		cli.StringFlag{
+			Name:   "filestorage, f",
+			Value:  home + "/.correios",
+			Usage:  "File used as storage",
+			EnvVar: "CORREIOS_FILESTORAGE",
+		},
 	}
-	addCmd := &cobra.Command{
-		Use:   "add <code>",
-		Short: "Store a order code to check later without specifying it",
-		Long: `After adding a order, simply just check the orders without passing the code to check command
-e.g.
-$ correios check`,
-		Run: add,
+	correios.Commands = []cli.Command{
+		{
+			Name:    "check",
+			Aliases: []string{"c"},
+			Usage:   "Check the status of one or more orders or the ones that you previously added",
+			Action:  check,
+		}, {
+			Name:    "list",
+			Aliases: []string{"l", "ls"},
+			Usage:   "List the codes stored",
+			Action:  list,
+		}, {
+			Name:    "add",
+			Aliases: []string{"a"},
+			Usage:   "Store an order code to check later without specifying it",
+			Action:  add,
+		}, {
+			Name:    "rm",
+			Aliases: []string{"rm"},
+			Usage:   "Remove an order code from the storage file",
+			Action:  rm,
+		},
 	}
-	rmCmd := &cobra.Command{
-		Use:   "rm <code>",
-		Short: "Remove an order code from the storage file",
-		Run:   rm,
-	}
-
-	correios.AddCommand(checkCmd)
-	correios.AddCommand(listCmd)
-	correios.AddCommand(addCmd)
-	correios.AddCommand(rmCmd)
-	correios.Execute()
+	correios.Run(os.Args)
 	db.Close()
 }
