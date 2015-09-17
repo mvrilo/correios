@@ -29,9 +29,7 @@ func almostFatal(s string) {
 
 const multiURL = "http://www2.correios.com.br/sistemas/rastreamento/multResultado.cfm"
 
-var db = &database{
-	flags: os.O_CREATE | os.O_RDWR,
-}
+var file *os.File
 
 type result struct {
 	codes  string
@@ -44,84 +42,62 @@ type order struct {
 	date   string
 }
 
-type database struct {
-	*os.File
-	flags   int
-	storage string
-}
-
-func (d *database) scan(fn func(*bufio.Scanner)) *os.File {
-	f, err := os.OpenFile(d.storage, d.flags, 0644)
-	if err != nil {
-		fmt.Println(err)
-		return nil
-	}
-
-	s := bufio.NewScanner(f)
+func scan(fn func(*bufio.Scanner)) {
+	s := bufio.NewScanner(file)
 	for s.Scan() {
 		fn(s)
 	}
 
-	if err = s.Err(); err != nil {
+	if err := s.Err(); err != nil {
 		fmt.Println(err)
 	}
-
-	return f
 }
 
-func (d *database) codeExists(code string) (b bool, f *os.File) {
-	f = d.scan(func(s *bufio.Scanner) {
+func codeExists(code string) (b bool) {
+	scan(func(s *bufio.Scanner) {
 		b = strings.Contains(s.Text(), code)
 	})
-	return b, f
+	return b
 }
 
-func (d *database) read() (data []string) {
-	d.scan(func(s *bufio.Scanner) {
+func read() (data []string) {
+	scan(func(s *bufio.Scanner) {
 		data = append(data, s.Text())
 	})
 	return data
 }
 
-func (d *database) write(code string) (bool, error) {
-	d.flags = d.flags | os.O_APPEND
-	ok, f := d.codeExists(code)
-	if f != nil {
-		defer f.Close()
-	}
+func write(code string) (bool, error) {
+	ok := codeExists(code)
 	if ok {
 		return true, nil
 	}
 
 	code = strings.Trim(code, "\n")
-	if _, err := f.WriteString(fmt.Sprintf("%s\n", code)); err != nil {
+	if _, err := file.WriteString(fmt.Sprintf("%s\n", code)); err != nil {
 		return false, err
 	}
 	return false, nil
 }
 
-func (d *database) remove(code string) (bool, error) {
-	d.flags = d.flags | os.O_APPEND
-	f, err := os.OpenFile(d.storage, d.flags, 0644)
-	if f != nil {
-		defer f.Close()
-	}
-	if err != nil {
-		return false, err
-	}
-
+func remove(code string) (bool, error) {
 	var newData []string
-	for _, line := range d.read() {
+	lines := read()
+	for _, line := range lines {
 		if code != line {
 			newData = append(newData, line)
 		}
 	}
 
-	if err = f.Truncate(0); err != nil {
+	if len(newData) == len(lines) {
+		return true, nil
+	}
+
+	if err := file.Truncate(0); err != nil {
 		return false, err
 	}
 
-	if _, err = f.WriteString(strings.Join(newData, "\n") + "\n"); err != nil {
+	if _, err := file.WriteString(strings.Join(newData, "\n") + "\n"); err != nil {
 		return false, err
 	}
 	return false, nil
@@ -194,7 +170,7 @@ func check(c *cli.Context) {
 		codes = strings.Join(args, ";")
 	} else {
 		var i int
-		for _, line := range db.read() {
+		for _, line := range read() {
 			if len(line) != 13 {
 				continue
 			}
@@ -210,7 +186,7 @@ func check(c *cli.Context) {
 }
 
 func list(c *cli.Context) {
-	fmt.Println(strings.Join(db.read(), "\n"))
+	fmt.Println(strings.Join(read(), "\n"))
 }
 
 func add(c *cli.Context) {
@@ -223,7 +199,7 @@ func add(c *cli.Context) {
 		almostFatal("Tracking code must have 13 characters")
 	}
 
-	exists, err := db.write(args[0])
+	exists, err := write(args[0])
 	if exists {
 		almostFatal("Tracking code already added")
 	}
@@ -236,7 +212,7 @@ func rm(c *cli.Context) {
 		almostFatal(c.App.Usage)
 	}
 
-	noExists, err := db.remove(args[0])
+	noExists, err := remove(args[0])
 	if noExists {
 		almostFatal("Tracking code not found")
 	}
@@ -256,7 +232,22 @@ func main() {
 	correios.Version = "0.1.0"
 	correios.EnableBashCompletion = true
 	correios.Before = func(c *cli.Context) error {
-		db.storage = c.String("f")
+		var f *os.File
+		var err error
+		defer func() {
+			if err != nil {
+				fatal(err)
+			}
+			file = f
+			file.Close()
+		}()
+		filestore := c.String("f")
+		if _, err = os.Stat(filestore); os.IsNotExist(err) {
+			f, err = os.Create(filestore)
+			return nil
+		}
+
+		f, err = os.OpenFile(filestore, os.O_APPEND|os.O_RDWR, 0644)
 		return nil
 	}
 	correios.Flags = []cli.Flag{
@@ -291,5 +282,5 @@ func main() {
 		},
 	}
 	correios.Run(os.Args)
-	db.Close()
+	file.Close()
 }
