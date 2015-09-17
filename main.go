@@ -266,7 +266,7 @@ func main() {
 	}
 	correios.Flags = []cli.Flag{
 		cli.StringFlag{
-			Name:   "filestorage, f",
+			Name:   "filestore, f",
 			Value:  home + "/.correios.yml",
 			Usage:  "File used as storage",
 			EnvVar: "CORREIOS_FILESTORAGE",
