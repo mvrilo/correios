@@ -1,8 +1,8 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"net/url"
 	"os"
@@ -11,11 +11,13 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/codegangsta/cli"
 	"github.com/mitchellh/go-homedir"
+	"gopkg.in/yaml.v2"
 )
 
 const multiURL = "http://www2.correios.com.br/sistemas/rastreamento/multResultado.cfm"
 
 var file *os.File
+var config map[string]interface{}
 
 func fatal(i interface{}) {
 	var s string
@@ -42,65 +44,61 @@ type order struct {
 	date   string
 }
 
-func scan(fn func(*bufio.Scanner)) {
-	s := bufio.NewScanner(file)
-	for s.Scan() {
-		fn(s)
+func getAll() map[string]string {
+	data := make(map[string]string)
+	for code, i := range config {
+		info, _ := i.(string)
+		data[code] = info
 	}
-
-	if err := s.Err(); err != nil {
-		fmt.Println(err)
-	}
-}
-
-func codeExists(code string) (b bool) {
-	scan(func(s *bufio.Scanner) {
-		b = strings.Contains(s.Text(), code)
-	})
-	return b
-}
-
-func read() (data []string) {
-	scan(func(s *bufio.Scanner) {
-		data = append(data, s.Text())
-	})
 	return data
 }
-
-func write(code string) (bool, error) {
-	ok := codeExists(code)
-	if ok {
-		return true, nil
-	}
-
-	code = strings.Trim(code, "\n")
-	if _, err := file.WriteString(fmt.Sprintf("%s\n", code)); err != nil {
-		return false, err
-	}
-	return false, nil
-}
-
-func remove(code string) (bool, error) {
-	var newData []string
-	lines := read()
-	for _, line := range lines {
-		if code != line {
-			newData = append(newData, line)
+func get(code string) (string, string, bool) {
+	for c, i := range config {
+		info, _ := i.(string)
+		if strings.Index(code, c) == 0 || strings.Index(code, info) == 0 {
+			return c, info, true
 		}
 	}
+	return "", "", false
+}
 
-	if len(newData) == len(lines) {
-		return true, nil
+func set(code, info string) bool {
+	if _, _, ok := get(code); ok {
+		return false
 	}
+	config[code] = info
+	return true
+}
 
-	if err := file.Truncate(0); err != nil {
-		return false, err
+func del(in string) bool {
+	if code, _, ok := get(in); ok {
+		delete(config, code)
+		return true
 	}
+	return false
+}
 
-	if _, err := file.WriteString(strings.Join(newData, "\n") + "\n"); err != nil {
-		return false, err
+func dump() {
+	b, err := yaml.Marshal(config)
+	fatal(err)
+
+	file.Truncate(0)
+	_, err = file.Write(b)
+	fatal(err)
+}
+
+func write(code, info string) {
+	if !set(code, info) {
+		fatal("Tracking code already added")
 	}
-	return false, nil
+	dump()
+}
+
+func remove(in string) {
+	if !del(in) {
+		fatal("Tracking code not found")
+	}
+	dump()
 }
 
 func fetchOrders(codes string) *result {
@@ -158,7 +156,11 @@ func (r *result) String() (ret string) {
 		if i > 0 {
 			ret += "\n"
 		}
-		ret += fmt.Sprintf("[%s] %s - %s", o.id, o.status, o.date)
+		if _, info, _ := get(o.id); info == "" {
+			ret += fmt.Sprintf("[%s] - %s", o.id, o.status, o.date)
+		} else {
+			ret += fmt.Sprintf("%s [%s] - %s - %s", info, o.id, o.status, o.date)
+		}
 	}
 	return
 }
@@ -167,18 +169,21 @@ func check(c *cli.Context) {
 	args := c.Args()
 	var codes string
 	if len(args) > 0 {
-		codes = strings.Join(args, ";")
+		for i, c := range args {
+			if code, _, ok := get(c); ok {
+				if i > 0 {
+					codes += ";"
+				}
+				codes += code
+			}
+		}
 	} else {
 		var i int
-		for _, line := range read() {
-			if len(line) != 13 {
-				continue
-			}
-
+		for code := range config {
 			if i > 0 {
 				codes += ";"
 			}
-			codes += strings.Split(line, " ")[0]
+			codes += code
 			i++
 		}
 	}
@@ -186,37 +191,41 @@ func check(c *cli.Context) {
 }
 
 func list(c *cli.Context) {
-	fmt.Println(strings.Join(read(), "\n"))
+	for code, info := range getAll() {
+		if info == "" {
+			fmt.Println("[" + code + "]")
+		} else {
+			fmt.Println(info + " [" + code + "]")
+		}
+	}
 }
 
 func add(c *cli.Context) {
 	args := c.Args()
-	if len(args) != 1 {
-		fatal(c.App.Usage)
+	if len(args) < 1 {
+		cli.CommandHelpTemplate = strings.Replace(cli.CommandHelpTemplate, "[arguments...]", "<code> [info]", -1)
+		cli.ShowCommandHelp(c, "add")
+		os.Exit(1)
 	}
-
 	if len(args[0]) != 13 {
 		fatal("Tracking code must have 13 characters")
 	}
 
-	exists, err := write(args[0])
-	if exists {
-		fatal("Tracking code already added")
+	if len(args) > 1 {
+		write(args[0], args[1])
+	} else {
+		write(args[0], "")
 	}
-	fatal(err)
 }
 
 func rm(c *cli.Context) {
 	args := c.Args()
 	if len(args) != 1 {
-		fatal(c.App.Usage)
+		cli.CommandHelpTemplate = strings.Replace(cli.CommandHelpTemplate, "[arguments...]", "<code || info>", -1)
+		cli.ShowCommandHelp(c, "remove")
+		os.Exit(1)
 	}
-
-	noExists, err := remove(args[0])
-	if noExists {
-		fatal("Tracking code not found")
-	}
-	fatal(err)
+	remove(args[0])
 }
 
 func main() {
@@ -229,7 +238,7 @@ func main() {
 	correios.Author = "Murilo Santana"
 	correios.Email = "mvrilo@gmail.com"
 	correios.Usage = "Simple command line tool to track your orders from Correios"
-	correios.Version = "0.1.0"
+	correios.Version = "1.0.0"
 	correios.EnableBashCompletion = true
 	correios.Before = func(c *cli.Context) error {
 		var f *os.File
@@ -239,6 +248,10 @@ func main() {
 				fatal(err)
 			}
 			file = f
+			var b []byte
+			b, err = ioutil.ReadAll(f)
+			fatal(err)
+			fatal(yaml.Unmarshal(b, &config))
 		}()
 		filestore := c.String("f")
 		if _, err = os.Stat(filestore); os.IsNotExist(err) {
@@ -254,7 +267,7 @@ func main() {
 	correios.Flags = []cli.Flag{
 		cli.StringFlag{
 			Name:   "filestorage, f",
-			Value:  home + "/.correios",
+			Value:  home + "/.correios.yml",
 			Usage:  "File used as storage",
 			EnvVar: "CORREIOS_FILESTORAGE",
 		},
