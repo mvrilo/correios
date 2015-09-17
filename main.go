@@ -239,11 +239,12 @@ func main() {
 				fatal(err)
 			}
 			file = f
-			file.Close()
 		}()
 		filestore := c.String("f")
 		if _, err = os.Stat(filestore); os.IsNotExist(err) {
-			f, err = os.Create(filestore)
+			if f, err = os.Create(filestore); err == nil && len(c.Args()) > 0 {
+				fmt.Println(" + " + filestore + " created.")
+			}
 			return nil
 		}
 
