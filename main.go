@@ -13,23 +13,23 @@ import (
 	"github.com/mitchellh/go-homedir"
 )
 
-func fatal(err error) {
-	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	}
-}
+const multiURL = "http://www2.correios.com.br/sistemas/rastreamento/multResultado.cfm"
 
-func almostFatal(s string) {
+var file *os.File
+
+func fatal(i interface{}) {
+	var s string
+	if in, ok := i.(string); ok {
+		s = in
+	}
+	if in, ok := i.(error); ok {
+		s = in.Error()
+	}
 	if s != "" {
 		fmt.Println(s)
 		os.Exit(1)
 	}
 }
-
-const multiURL = "http://www2.correios.com.br/sistemas/rastreamento/multResultado.cfm"
-
-var file *os.File
 
 type result struct {
 	codes  string
@@ -192,16 +192,16 @@ func list(c *cli.Context) {
 func add(c *cli.Context) {
 	args := c.Args()
 	if len(args) != 1 {
-		almostFatal(c.App.Usage)
+		fatal(c.App.Usage)
 	}
 
 	if len(args[0]) != 13 {
-		almostFatal("Tracking code must have 13 characters")
+		fatal("Tracking code must have 13 characters")
 	}
 
 	exists, err := write(args[0])
 	if exists {
-		almostFatal("Tracking code already added")
+		fatal("Tracking code already added")
 	}
 	fatal(err)
 }
@@ -209,12 +209,12 @@ func add(c *cli.Context) {
 func rm(c *cli.Context) {
 	args := c.Args()
 	if len(args) != 1 {
-		almostFatal(c.App.Usage)
+		fatal(c.App.Usage)
 	}
 
 	noExists, err := remove(args[0])
 	if noExists {
-		almostFatal("Tracking code not found")
+		fatal("Tracking code not found")
 	}
 	fatal(err)
 }
