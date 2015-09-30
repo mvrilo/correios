@@ -17,7 +17,7 @@ import (
 const multiURL = "http://www2.correios.com.br/sistemas/rastreamento/multResultado.cfm"
 
 var file *os.File
-var config map[string]interface{}
+var config = make(map[string]interface{})
 
 func fatal(i interface{}) {
 	var s string
@@ -62,22 +62,6 @@ func get(code string) (string, string, bool) {
 	return "", "", false
 }
 
-func set(code, info string) bool {
-	if _, _, ok := get(code); ok {
-		return false
-	}
-	config[code] = info
-	return true
-}
-
-func del(in string) bool {
-	if code, _, ok := get(in); ok {
-		delete(config, code)
-		return true
-	}
-	return false
-}
-
 func dump() {
 	b, err := yaml.Marshal(config)
 	fatal(err)
@@ -88,17 +72,14 @@ func dump() {
 }
 
 func write(code, info string) {
-	if !set(code, info) {
+	if _, _, ok := get(code); ok {
 		fatal("Tracking code already added")
 	}
+	config[code] = info
 	dump()
 }
 
 func remove(in string) {
-	if !del(in) {
-		fatal("Tracking code not found")
-	}
-	dump()
 }
 
 func fetchOrders(codes string) *result {
@@ -157,7 +138,7 @@ func (r *result) String() (ret string) {
 			ret += "\n"
 		}
 		if _, info, _ := get(o.id); info == "" {
-			ret += fmt.Sprintf("[%s] - %s", o.id, o.status, o.date)
+			ret += fmt.Sprintf("[%s] - %s - %s", o.id, o.status, o.date)
 		} else {
 			ret += fmt.Sprintf("%s [%s] - %s - %s", info, o.id, o.status, o.date)
 		}
@@ -225,7 +206,12 @@ func rm(c *cli.Context) {
 		cli.ShowCommandHelp(c, "remove")
 		os.Exit(1)
 	}
-	remove(args[0])
+	if code, _, ok := get(args[0]); ok {
+		delete(config, code)
+		dump()
+		return
+	}
+	fatal("Tracking code not found")
 }
 
 func main() {
@@ -248,8 +234,7 @@ func main() {
 				fatal(err)
 			}
 			file = f
-			var b []byte
-			b, err = ioutil.ReadAll(f)
+			b, err := ioutil.ReadAll(f)
 			fatal(err)
 			fatal(yaml.Unmarshal(b, &config))
 		}()
